@@ -28,7 +28,11 @@ enum StoryStage
 	/* Level 3 -- same pattern: once before the fort raid
 	   begins, once after Lord Wright is defeated. */
 	STORY_LEVEL3_START,
-	STORY_LEVEL3_END
+	STORY_LEVEL3_END,
+
+	/* Level 4 -- final fort confrontation. */
+	STORY_LEVEL4_START,
+	STORY_LEVEL4_END
 };
 
 
@@ -156,6 +160,40 @@ static const char* STORY_CAPTION_LEVEL3_END =
 
 
 /* =========================================================
+LEVEL 4 CAPTIONS
+========================================================= */
+
+static const char* STORY_CAPTION_LEVEL4_START =
+
+"The sealed document finally reveals the truth.\n\n"
+
+"Someone within the Nawab's own forces has been secretly feeding vital information to the British.\n\n"
+
+"And the betrayer is none other than Aziz Ali, the Commander-in-Chief of the Nawab's army.\n\n"
+
+"But before Shamsher can reach him, Lord Huron stands in his way.\n\n"
+
+"Shamsher must defeat Lord Huron and push deeper into the fort.\n"
+"Beyond him awaits Aziz Ali.\n\n"
+
+"The final battle begins.";
+
+
+static const char* STORY_CAPTION_LEVEL4_END =
+
+"Both Lord Huron and Aziz Ali have fallen.\n\n"
+
+"The traitor's betrayal has finally been exposed. Aziz Ali, the Nawab's Commander-in-Chief, had secretly helped the British weaken Bengal from within.\n\n"
+
+"Among his records, Shamsher finds his father's final message.\n\n"
+
+"Kazi Rahmat had discovered Aziz Ali's betrayal before he disappeared and left the trail for his son to follow.\n\n"
+
+"Shamsher finally understands why his father vanished.\n\n"
+
+"The trail is over. The truth remains. And Bengal stands on the edge of war.";
+
+/* =========================================================
 STOP ALL SOUND
 ========================================================= */
 
@@ -222,6 +260,16 @@ inline void storyStart(StoryStage stage)
 	else if (stage == STORY_LEVEL3_END)
 	{
 		currentState = STORY_LEVEL3_END_STATE;
+	}
+
+	else if (stage == STORY_LEVEL4_START)
+	{
+		currentState = STORY_LEVEL4_START_STATE;
+	}
+
+	else if (stage == STORY_LEVEL4_END)
+	{
+		currentState = STORY_LEVEL4_END_STATE;
 	}
 }
 
@@ -314,6 +362,26 @@ inline void startNarration()
 			SND_ASYNC
 			);
 	}
+
+	else if (storyStage == STORY_LEVEL4_START)
+	{
+		PlaySound(
+			TEXT("Audios\\Level4Audio1.wav"),
+			NULL,
+			SND_FILENAME |
+			SND_ASYNC
+			);
+	}
+
+	else if (storyStage == STORY_LEVEL4_END)
+	{
+		PlaySound(
+			TEXT("Audios\\Level4Audio2.wav"),
+			NULL,
+			SND_FILENAME |
+			SND_ASYNC
+			);
+	}
 }
 
 
@@ -332,7 +400,9 @@ inline void storyUpdate()
 		currentState != STORY_LEVEL2_START_STATE &&
 		currentState != STORY_LEVEL2_END_STATE &&
 		currentState != STORY_LEVEL3_START_STATE &&
-		currentState != STORY_LEVEL3_END_STATE
+		currentState != STORY_LEVEL3_END_STATE &&
+		currentState != STORY_LEVEL4_START_STATE &&
+		currentState != STORY_LEVEL4_END_STATE
 		)
 	{
 		return;
@@ -559,6 +629,58 @@ inline void storyContinue()
 				SND_LOOP
 				);
 		}
+
+		return;
+	}
+
+
+	/* =========================
+	LEVEL 4 BRIEFING FINISHED
+	(final fort -> gameplay)
+	========================= */
+
+	if (currentState == STORY_LEVEL4_START_STATE)
+	{
+		storyStage = STORY_NONE;
+
+		currentState = LEVEL4_PLAYING;
+
+		if (musicOn)
+		{
+			PlaySound(
+				TEXT("Images\\level 1.wav"),
+				NULL,
+				SND_FILENAME |
+				SND_ASYNC |
+				SND_LOOP
+				);
+		}
+
+		return;
+	}
+
+
+	/* =========================
+	LEVEL 4 ENDING FINISHED
+	(final truth revealed -> complete screen)
+	========================= */
+
+	if (currentState == STORY_LEVEL4_END_STATE)
+	{
+		storyStage = STORY_NONE;
+
+		currentState = LEVEL_COMPLETE;
+
+		if (musicOn)
+		{
+			PlaySound(
+				TEXT("Images\\interface.wav"),
+				NULL,
+				SND_FILENAME |
+				SND_ASYNC |
+				SND_LOOP
+				);
+		}
 	}
 }
 
@@ -672,7 +794,7 @@ inline void storyDrawGeorgiaText(
 	HFONT font =
 		CreateFontA(
 
-		22,
+		20,
 		0,
 		0,
 		0,
@@ -1211,6 +1333,34 @@ inline void drawStory()
 			STORY_CAPTION_LEVEL3_END,
 
 			"THE SEALED DOCUMENT"
+			);
+	}
+
+
+	else if (
+		currentState ==
+		STORY_LEVEL4_START_STATE
+		)
+	{
+		drawStoryBox(
+
+			STORY_CAPTION_LEVEL4_START,
+
+			"MISSION 4 : THE FINAL FORT"
+			);
+	}
+
+
+	else if (
+		currentState ==
+		STORY_LEVEL4_END_STATE
+		)
+	{
+		drawStoryBox(
+
+			STORY_CAPTION_LEVEL4_END,
+
+			"THE FINAL TRUTH"
 			);
 	}
 }

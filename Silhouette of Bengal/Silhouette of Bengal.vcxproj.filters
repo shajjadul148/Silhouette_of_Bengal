@@ -47,7 +47,13 @@
     <ClInclude Include="hero3.h">
       <Filter>Header Files</Filter>
     </ClInclude>
+    <ClInclude Include="hero4.h">
+      <Filter>Header Files</Filter>
+    </ClInclude>
     <ClInclude Include="story.h">
+      <Filter>Header Files</Filter>
+    </ClInclude>
+    <ClInclude Include="SaveSystem.h">
       <Filter>Header Files</Filter>
     </ClInclude>
     <ClInclude Include="Obstacle.h">

@@ -21,7 +21,7 @@ Images\Enemy_4\... asset pack.)
 ========================================================= */
 #define SOLDIER4_FIRE_RATE         75       // Frames between gunshots
 #define SOLDIER4_BULLET_SPEED      8.5f     // Projectile speed (px/frame)
-#define SOLDIER4_BULLET_DAMAGE     15       // Damage dealt to hero per bullet hit
+#define SOLDIER4_BULLET_DAMAGE     20       // Damage dealt to hero per bullet hit (100 HP / 20 = 5 bullets to kill hero)
 #define SOLDIER4_KEEP_DIST         80.0f    // Distance soldier tries to keep from hero
 #define SOLDIER4_DIST_TOLERANCE    50.0f    // Margin around target distance before moving
 #define SOLDIER4_RUN_SPEED         3.2f     // Speed when retreating (backing off)
@@ -121,6 +121,19 @@ Images\Enemy_4\... asset pack.)
 #define BULLET4_PRO_FRAMES         2
 #define BULLET4_ANIM_SPEED         5
 
+/* Ambush waves (extra mixed groups that spawn AROUND the hero, just
+   off-screen, so the fights last longer and come from both sides).
+   Order in the level:
+     W1 blues -> W1 soldiers -> AMBUSH 1 -> W2 blues -> AMBUSH 2 ->
+     W2 soldiers -> AMBUSH 3 -> Boss1 wave -> AMBUSH 4 -> Boss2 wave
+   Tune the counts below to make the level longer or shorter.
+   Keep (blues + soldiers) <= MAX_ACTIVE_ENEMIES4 (7). */
+#define LEVEL4_AMBUSH_COUNT        4
+#define AMBUSH4_SPAWN_BASE_OFFSET  560.0f   // px from hero (just off-screen)
+#define AMBUSH4_SPAWN_STEP         90.0f    // extra px between group members
+#define AMBUSH4_MIN_X              120.0f
+#define AMBUSH4_MAX_X              (LEVEL4_WIDTH - 220.0f)
+
 /* Wave composition constants */
 #define WAVE1_BLUE4_COUNT          4
 #define WAVE1_SOLDIER4_COUNT       2
@@ -135,6 +148,12 @@ Images\Enemy_4\... asset pack.)
    active-enemy pool below. */
 #define BOSS2_ESCORT_COUNT         6
 #define MAX_ACTIVE_ENEMIES4        (BOSS2_ESCORT_COUNT + 1)
+
+/* Level 4: number of hero bullets needed to kill each enemy type. */
+#define L4_BULLETS_TO_KILL_NORMAL   3    // Blue / normal enemy
+#define L4_BULLETS_TO_KILL_SOLDIER  5
+#define L4_BULLETS_TO_KILL_BOSS1    7
+#define L4_BULLETS_TO_KILL_BOSS2    10
 
 #define PLAYER4_ATTACK_RANGE       40.0f
 #define PLAYER4_ATTACK_DAMAGE      20
@@ -153,7 +172,7 @@ ENUMS
 enum Enemy4Type { TYPE4_BLUE, TYPE4_SOLDIER, TYPE4_BOSS, TYPE4_BOSS2 };
 enum Enemy4Facing { ENEMY4_FACING_LEFT = -1, ENEMY4_FACING_RIGHT = 1 };
 enum Enemy4State { ENEMY4_STANDING, ENEMY4_WALKING, ENEMY4_RUNNING, ENEMY4_FIGHTING, ENEMY4_HURT, ENEMY4_DEAD };
-enum Level4Wave { L4_WAVE1_BLUES, L4_WAVE1_SOLDIERS, L4_WAVE2_BLUES, L4_WAVE2_SOLDIERS, L4_WAVE3_BOSS, L4_WAVE4_BOSS2, L4_COMPLETE };
+enum Level4Wave { L4_WAVE1_BLUES, L4_WAVE1_SOLDIERS, L4_WAVE2_BLUES, L4_WAVE2_SOLDIERS, L4_AMBUSH, L4_WAVE3_BOSS, L4_WAVE4_BOSS2, L4_COMPLETE };
 
 /* =========================================================
 BULLET PROJECTILE STRUCT
@@ -594,6 +613,24 @@ public:
 		return dx <= range && dy <= 55.0f;
 	}
 
+	/* One hero bullet hit. Damage is scaled from this enemy's max HP so it
+	   dies after exactly the required number of bullets (also keeps the
+	   health bar draining evenly). */
+	void takeBulletHit()
+	{
+		int need;
+		switch (type)
+		{
+		case TYPE4_BLUE:    need = L4_BULLETS_TO_KILL_NORMAL;  break;
+		case TYPE4_SOLDIER: need = L4_BULLETS_TO_KILL_SOLDIER; break;
+		case TYPE4_BOSS:    need = L4_BULLETS_TO_KILL_BOSS1;   break;
+		default:            need = L4_BULLETS_TO_KILL_BOSS2;   break;
+		}
+		int dmg = (maxHp + need - 1) / need;   // ceil(maxHp / need)
+		if (dmg < 1) dmg = 1;
+		takeDamage(dmg);
+	}
+
 	void takeDamage(int amount)
 	{
 		if (!alive) return;
@@ -636,6 +673,8 @@ public:
 	int waveEscortsDefeated;
 	bool waveBoss2Defeated;
 	int waveEscorts2Defeated;
+	int ambushIndex;
+	int ambushDefeated;
 	bool waitingToRespawn;
 	int respawnTimer;
 
@@ -648,6 +687,8 @@ public:
 		waveEscortsDefeated = 0;
 		waveBoss2Defeated = false;
 		waveEscorts2Defeated = 0;
+		ambushIndex = 0;
+		ambushDefeated = 0;
 		waitingToRespawn = false;
 		respawnTimer = 0;
 	}
@@ -685,6 +726,8 @@ public:
 		waveEscortsDefeated = 0;
 		waveBoss2Defeated = false;
 		waveEscorts2Defeated = 0;
+		ambushIndex = 0;
+		ambushDefeated = 0;
 		waitingToRespawn = false;
 		respawnTimer = 0;
 
@@ -739,6 +782,152 @@ public:
 		}
 	}
 
+	static int ambushBlueCount(int idx)
+	{
+		static const int n[LEVEL4_AMBUSH_COUNT] = { 3, 2, 3, 3 };
+		return n[idx];
+	}
+
+	static int ambushSoldierCount(int idx)
+	{
+		static const int n[LEVEL4_AMBUSH_COUNT] = { 2, 3, 3, 3 };
+		return n[idx];
+	}
+
+	static int ambushTotal(int idx)
+	{
+		return ambushBlueCount(idx) + ambushSoldierCount(idx);
+	}
+
+	/* Picks a spawn X around the hero for group member k. Prefers a spot
+	   just off-screen (AMBUSH4_SPAWN_BASE_OFFSET + k*STEP away), alternating
+	   right/left, and searches nearer/farther offsets until it finds one
+	   that (a) is inside the world, (b) is clear of rocks, (c) has NO rock
+	   between it and the hero (an enemy stuck behind a rock could not be
+	   hit or hit back, which would soft-lock the wave), and (d) is at
+	   least 90 px from the members already placed (used[0..nUsed-1]). */
+	static float ambushSpawnX(int k, const float* used, int nUsed)
+	{
+		float pref = AMBUSH4_SPAWN_BASE_OFFSET + k * AMBUSH4_SPAWN_STEP;
+		float dir = (k % 2 == 0) ? 1.0f : -1.0f;
+
+		/* Pass 0: preferred rules. Pass 1: looser rules for cramped spots
+		   (e.g. the gap between two rocks) -- closer to the hero and
+		   closer to each other. */
+		for (int pass = 0; pass < 2; pass++)
+		{
+			float minOff = (pass == 0) ? 250.0f : 150.0f;
+			float minGap = (pass == 0) ? 90.0f : 45.0f;
+
+			for (float delta = 0.0f; delta <= 950.0f; delta += 45.0f)
+			{
+				for (int t = 0; t < 2; t++)
+				{
+					if (t == 1 && delta == 0.0f) continue;
+					float off = (t == 0) ? (pref - delta) : (pref + delta);
+					if (off < minOff || off > 1100.0f) continue;
+
+					for (int side = 0; side < 2; side++)
+					{
+						float d = (side == 0) ? dir : -dir;
+						float cx = playerX + d * off;
+						if (cx < AMBUSH4_MIN_X || cx > AMBUSH4_MAX_X) continue;
+						float sx = level4SafeEnemySpawnX(cx, ENEMY4_GROUND_Y);
+						if (sx < AMBUSH4_MIN_X || sx > AMBUSH4_MAX_X) continue;
+						if (isLevel4CoverBetween(playerX, playerY, sx, ENEMY4_GROUND_Y)) continue;
+
+						bool tooClose = false;
+						for (int u = 0; u < nUsed; u++)
+							if (fabsf(sx - used[u]) < minGap) { tooClose = true; break; }
+						if (tooClose) continue;
+
+						return sx;
+					}
+				}
+			}
+		}
+
+		/* Last resort (very rare): 200 px from the hero on whichever side has
+		   no rock in the way; members may overlap here. */
+		for (int side = 0; side < 2; side++)
+		{
+			float d = (side == 0) ? dir : -dir;
+			float fx = playerX + d * 200.0f;
+			if (fx < AMBUSH4_MIN_X) fx = AMBUSH4_MIN_X;
+			if (fx > AMBUSH4_MAX_X) fx = AMBUSH4_MAX_X;
+			if (!isLevel4CoverBetween(playerX, playerY, fx, ENEMY4_GROUND_Y))
+				return fx;
+		}
+		float fx = playerX + dir * 200.0f;
+		if (fx < AMBUSH4_MIN_X) fx = AMBUSH4_MIN_X;
+		if (fx > AMBUSH4_MAX_X) fx = AMBUSH4_MAX_X;
+		return fx;
+	}
+
+	/* Spawns ambush group `idx` (0..3) all at once. Enemies get a bit
+	   tougher (melee) and worth more score with each ambush. */
+	void startAmbush(int idx)
+	{
+		waveState = L4_AMBUSH;
+		ambushIndex = idx;
+		ambushDefeated = 0;
+
+		int tier = idx;
+		int slot = 0;
+		float used[MAX_ACTIVE_ENEMIES4];
+		int nb = ambushBlueCount(idx);
+		int ns = ambushSoldierCount(idx);
+
+		for (int b = 0; b < nb && slot < MAX_ACTIVE_ENEMIES4; b++, slot++)
+		{
+			float bx = ambushSpawnX(slot, used, slot); used[slot] = bx;
+			activeEnemies[slot].spawn(TYPE4_BLUE, bx, ENEMY4_GROUND_Y,
+				45 + tier * 5, BLUE4_ATTACK_DAMAGE + 1 + tier * 2, BLUE4_ATTACK_RANGE, 28 + tier * 4);
+		}
+		for (int q = 0; q < ns && slot < MAX_ACTIVE_ENEMIES4; q++, slot++)
+		{
+			float sx = ambushSpawnX(slot, used, slot); used[slot] = sx;
+			activeEnemies[slot].spawn(TYPE4_SOLDIER, sx, ENEMY4_GROUND_Y,
+				70 + tier * 10, SOLDIER4_BULLET_DAMAGE, SOLDIER4_KEEP_DIST, 55 + tier * 5);
+		}
+	}
+
+	/* Wave 2's two soldiers (spawned once Wave 2's blues AND Ambush 2 are
+	   cleared). */
+	void spawnWave2Soldiers()
+	{
+		waveState = L4_WAVE2_SOLDIERS;
+		waveSoldierDefeated = 0;
+		float s0x = level4SafeEnemySpawnX(3000.0f, ENEMY4_GROUND_Y);
+		float s1x = level4SafeEnemySpawnX(3150.0f, ENEMY4_GROUND_Y);
+		activeEnemies[0].spawn(TYPE4_SOLDIER, s0x, ENEMY4_GROUND_Y, 80, SOLDIER4_BULLET_DAMAGE + 5, SOLDIER4_KEEP_DIST, 60);
+		activeEnemies[1].spawn(TYPE4_SOLDIER, s1x, ENEMY4_GROUND_Y, 80, SOLDIER4_BULLET_DAMAGE + 5, SOLDIER4_KEEP_DIST, 60);
+	}
+
+	/* Called when an ambush group is fully cleared: moves on to whatever
+	   comes next in the level. */
+	void advanceAfterAmbush()
+	{
+		switch (ambushIndex)
+		{
+		case 0:   /* after W1 soldiers -> Wave 2 blues */
+			waveState = L4_WAVE2_BLUES;
+			waveBlueDefeated = 0;
+			waitingToRespawn = true;
+			respawnTimer = ENEMY4_RESPAWN_DELAY;
+			break;
+		case 1:   /* after W2 blues -> Ambush 3 */
+			startAmbush(2);
+			break;
+		case 2:   /* after Ambush 3 -> Wave 2 soldiers */
+			spawnWave2Soldiers();
+			break;
+		default:  /* after Boss1 -> Boss2 wave */
+			spawnBoss2Wave();
+			break;
+		}
+	}
+
 	void spawnNextInWave()
 	{
 		if (waveState == L4_WAVE1_BLUES)
@@ -769,14 +958,10 @@ public:
 			}
 			else
 			{
-				/* Last fight of wave 2: exactly WAVE2_SOLDIER4_COUNT (2)
-				   Soldiers spawn together. */
-				waveState = L4_WAVE2_SOLDIERS;
-				waveSoldierDefeated = 0;
-				float s0x = level4SafeEnemySpawnX(3000.0f, ENEMY4_GROUND_Y);
-				float s1x = level4SafeEnemySpawnX(3150.0f, ENEMY4_GROUND_Y);
-				activeEnemies[0].spawn(TYPE4_SOLDIER, s0x, ENEMY4_GROUND_Y, 80, SOLDIER4_BULLET_DAMAGE + 5, SOLDIER4_KEEP_DIST, 60);
-				activeEnemies[1].spawn(TYPE4_SOLDIER, s1x, ENEMY4_GROUND_Y, 80, SOLDIER4_BULLET_DAMAGE + 5, SOLDIER4_KEEP_DIST, 60);
+				/* Wave 2's blues are done: ambush group 2 comes next; the
+				   two Wave 2 soldiers follow after it (see
+				   advanceAfterAmbush()). */
+				startAmbush(1);
 			}
 		}
 	}
@@ -960,6 +1145,15 @@ public:
 						spawnHealingPickup(activeEnemies[i].x, activeEnemies[i].y);
 					}
 				}
+				else if (waveState == L4_AMBUSH)
+				{
+					ambushDefeated++;
+
+					/* Same healing-kit rule as the soldier waves: the LAST
+					   enemy of the ambush drops a pickup where it fell. */
+					if (ambushDefeated == ambushTotal(ambushIndex))
+						spawnHealingPickup(activeEnemies[i].x, activeEnemies[i].y);
+				}
 				else if (waveState == L4_WAVE3_BOSS)
 				{
 					if (activeEnemies[i].type == TYPE4_BOSS)
@@ -1010,18 +1204,22 @@ public:
 		   player simply cannot progress the encounter until then. */
 		if (waveState == L4_WAVE1_SOLDIERS && waveSoldierDefeated >= WAVE1_SOLDIER4_COUNT && currentActiveCount == 0)
 		{
-			waveState = L4_WAVE2_BLUES;
-			waveBlueDefeated = 0;
-			waitingToRespawn = true;
-			respawnTimer = ENEMY4_RESPAWN_DELAY;
+			/* Wave 1 cleared -> Ambush 1 (then Wave 2 blues). */
+			startAmbush(0);
+		}
+		else if (waveState == L4_AMBUSH && ambushDefeated >= ambushTotal(ambushIndex) && currentActiveCount == 0)
+		{
+			advanceAfterAmbush();
 		}
 		else if (waveState == L4_WAVE2_SOLDIERS && waveSoldierDefeated >= WAVE2_SOLDIER4_COUNT && currentActiveCount == 0)
 		{
+			/* Wave 2 cleared -> Boss1 wave. */
 			spawnBossWave();
 		}
 		else if (waveState == L4_WAVE3_BOSS && waveBossDefeated && currentActiveCount == 0)
 		{
-			spawnBoss2Wave();
+			/* Boss1 down -> Ambush 4, then the Boss2 wave. */
+			startAmbush(3);
 		}
 		else if (waveState == L4_WAVE4_BOSS2 && waveBoss2Defeated && currentActiveCount == 0)
 		{
@@ -1088,6 +1286,10 @@ inline void Enemy4::update(EnemyManager4* mgr)
 		if (frameTimer >= ENEMY4_ANIM_SPEED)
 		{
 			frameTimer = 0;
+			/* Fight/run animations are longer than the walk ones (e.g.
+			   Blue: 5 fight vs 3 walk frames). Restart at frame 0 so the
+			   old frame index can't run off the end of a walk array. */
+			currentFrame = 0;
 			state = ENEMY4_WALKING;
 		}
 		return;
@@ -1370,6 +1572,13 @@ inline float enemy4VisualYOffset(Enemy4Type t)
 	}
 }
 
+/* Clamp a frame index into [0, count) so a stale index left over from a
+   longer animation can never read past the end of a texture array. */
+inline int enemy4SafeFrame(int f, int count)
+{
+	return (f < 0 || f >= count) ? 0 : f;
+}
+
 inline void Enemy4::draw()
 {
 	if (!alive) return;
@@ -1383,38 +1592,38 @@ inline void Enemy4::draw()
 	if (type == TYPE4_BLUE)
 	{
 		if (state == ENEMY4_FIGHTING)
-			tex = (facing == ENEMY4_FACING_LEFT) ? enemy4BlueFightLeftTex[currentFrame] : enemy4BlueFightRightTex[currentFrame];
+			tex = (facing == ENEMY4_FACING_LEFT) ? enemy4BlueFightLeftTex[enemy4SafeFrame(currentFrame, BLUE4_FIGHT_FRAMES)] : enemy4BlueFightRightTex[enemy4SafeFrame(currentFrame, BLUE4_FIGHT_FRAMES)];
 		else if (state == ENEMY4_WALKING)
-			tex = (facing == ENEMY4_FACING_LEFT) ? enemy4BlueWalkLeftTex[currentFrame] : enemy4BlueWalkRightTex[currentFrame];
+			tex = (facing == ENEMY4_FACING_LEFT) ? enemy4BlueWalkLeftTex[enemy4SafeFrame(currentFrame, BLUE4_WALK_FRAMES)] : enemy4BlueWalkRightTex[enemy4SafeFrame(currentFrame, BLUE4_WALK_FRAMES)];
 		else
 			tex = (facing == ENEMY4_FACING_LEFT) ? enemy4BlueStandLeftTex : enemy4BlueStandRightTex;
 	}
 	else if (type == TYPE4_SOLDIER)
 	{
 		if (state == ENEMY4_FIGHTING)
-			tex = (facing == ENEMY4_FACING_LEFT) ? soldier4FightLeftTex[currentFrame] : soldier4FightRightTex[currentFrame];
+			tex = (facing == ENEMY4_FACING_LEFT) ? soldier4FightLeftTex[enemy4SafeFrame(currentFrame, SOLDIER4_FIGHT_FRAMES)] : soldier4FightRightTex[enemy4SafeFrame(currentFrame, SOLDIER4_FIGHT_FRAMES)];
 		else if (state == ENEMY4_RUNNING)
-			tex = (facing == ENEMY4_FACING_LEFT) ? soldier4RunLeftTex[currentFrame] : soldier4RunRightTex[currentFrame];
+			tex = (facing == ENEMY4_FACING_LEFT) ? soldier4RunLeftTex[enemy4SafeFrame(currentFrame, SOLDIER4_RUN_FRAMES)] : soldier4RunRightTex[enemy4SafeFrame(currentFrame, SOLDIER4_RUN_FRAMES)];
 		else if (state == ENEMY4_WALKING)
-			tex = (facing == ENEMY4_FACING_LEFT) ? soldier4WalkLeftTex[currentFrame] : soldier4WalkRightTex[currentFrame];
+			tex = (facing == ENEMY4_FACING_LEFT) ? soldier4WalkLeftTex[enemy4SafeFrame(currentFrame, SOLDIER4_WALK_FRAMES)] : soldier4WalkRightTex[enemy4SafeFrame(currentFrame, SOLDIER4_WALK_FRAMES)];
 		else
 			tex = (facing == ENEMY4_FACING_LEFT) ? soldier4StandLeftTex : soldier4StandRightTex;
 	}
 	else if (type == TYPE4_BOSS)
 	{
 		if (state == ENEMY4_FIGHTING)
-			tex = (facing == ENEMY4_FACING_LEFT) ? boss4FightLeftTex[currentFrame] : boss4FightRightTex[currentFrame];
+			tex = (facing == ENEMY4_FACING_LEFT) ? boss4FightLeftTex[enemy4SafeFrame(currentFrame, BOSS4_FIGHT_FRAMES)] : boss4FightRightTex[enemy4SafeFrame(currentFrame, BOSS4_FIGHT_FRAMES)];
 		else if (state == ENEMY4_WALKING)
-			tex = (facing == ENEMY4_FACING_LEFT) ? boss4WalkLeftTex[currentFrame] : boss4WalkRightTex[currentFrame];
+			tex = (facing == ENEMY4_FACING_LEFT) ? boss4WalkLeftTex[enemy4SafeFrame(currentFrame, BOSS4_WALK_FRAMES)] : boss4WalkRightTex[enemy4SafeFrame(currentFrame, BOSS4_WALK_FRAMES)];
 		else
 			tex = (facing == ENEMY4_FACING_LEFT) ? boss4StandLeftTex : boss4StandRightTex;
 	}
 	else if (type == TYPE4_BOSS2)
 	{
 		if (state == ENEMY4_FIGHTING)
-			tex = (facing == ENEMY4_FACING_LEFT) ? boss2FightLeftTex[currentFrame] : boss2FightRightTex[currentFrame];
+			tex = (facing == ENEMY4_FACING_LEFT) ? boss2FightLeftTex[enemy4SafeFrame(currentFrame, BOSS2_FIGHT_FRAMES)] : boss2FightRightTex[enemy4SafeFrame(currentFrame, BOSS2_FIGHT_FRAMES)];
 		else if (state == ENEMY4_WALKING)
-			tex = (facing == ENEMY4_FACING_LEFT) ? boss2WalkLeftTex[currentFrame] : boss2WalkRightTex[currentFrame];
+			tex = (facing == ENEMY4_FACING_LEFT) ? boss2WalkLeftTex[enemy4SafeFrame(currentFrame, BOSS2_WALK_FRAMES)] : boss2WalkRightTex[enemy4SafeFrame(currentFrame, BOSS2_WALK_FRAMES)];
 		else
 			tex = (facing == ENEMY4_FACING_LEFT) ? boss2StandLeftTex : boss2StandRightTex;
 	}

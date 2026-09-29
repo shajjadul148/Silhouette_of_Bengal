@@ -15,12 +15,14 @@
 #include "StairMechanics.h"
 #include "hero2.h"
 #include "hero3.h"
+#include "hero4.h"
 #include "Obstacle2.h"
 #include "enemy2.h"
 #include "enemy3.h"
 #include "collision3.h"
 #include "enemy4.h"
 #include "collision4.h"
+#include "SaveSystem.h"
 
 /* =========================================================
 GLOBAL DEFINITIONS
@@ -36,7 +38,11 @@ int selectedMenu = 0, health = 100, score = 0, level = 1;
 bool soundOn = true, musicOn = true;
 
 Button startButton = { 390, 375, 240, 55 };
-Button levelButton = { 390, 305, 240, 55 };
+Button levelButton = { 390, 305, 240, 55 }; /* kept for compatibility */
+Button optionsButton = { 390, 305, 240, 55 };
+Button loadGameButton = { 390, 350, 240, 55 };
+Button highScoreButton = { 390, 280, 240, 55 };
+Button creditsButton = { 390, 210, 240, 55 };
 Button level1Button = { 390, 400, 240, 55 };
 Button level2Button = { 390, 330, 240, 55 };
 Button level3Button = { 390, 260, 240, 55 };
@@ -57,6 +63,10 @@ Button restartButton = { 390, 280, 240, 55 };
 Button backToMenuButton = { 10, 505, 100, 25 };
 Button viewOptionsButton = { 412, 35, 200, 55 };
 Button nextLevelButton = { 390, 280, 240, 55 };
+Button nameConfirmButton = { 390, 230, 240, 55 };
+
+/* where to go after the player confirms a name */
+GameState nameNextState = MENU;
 
 
 /* =========================================================
@@ -206,13 +216,120 @@ void drawButton(Button b, char text[],
 		GLUT_BITMAP_HELVETICA_18);
 }
 
+void drawOptions()
+{
+	drawBlurredInterface();
+	drawPurpleTitleBox(382, 460, 260, 60);
+	iSetColor(255, 255, 255);
+	iText(425, 482, "OPTIONS", GLUT_BITMAP_TIMES_ROMAN_24);
+
+	drawButton(loadGameButton, "LOAD GAME", false, hoverOffset[0]);
+	drawButton(highScoreButton, "HIGH SCORE", false, hoverOffset[1]);
+	drawButton(creditsButton, "CREDITS", false, hoverOffset[2]);
+	drawButton(backButton, "BACK", false, hoverOffset[3]);
+}
+
+void drawHighScore()
+{
+	drawBlurredInterface();
+	drawPurpleTitleBox(350, 460, 325, 60);
+	iSetColor(255, 255, 255);
+	iText(410, 482, "HIGH SCORE", GLUT_BITMAP_TIMES_ROMAN_24);
+
+	hsDraw(205, 405);
+	drawButton(backButton, "BACK", false, hoverOffset[0]);
+}
+
+void drawCredits()
+{
+	drawBlurredInterface();
+	drawPurpleTitleBox(390, 460, 245, 60);
+	iSetColor(255, 255, 255);
+	iText(445, 482, "CREDITS", GLUT_BITMAP_TIMES_ROMAN_24);
+
+	// High-contrast credit text: dark shadow + bright foreground
+	// so the names and IDs remain clearly readable over the background.
+
+	// 1st member
+	iSetColor(20, 10, 35);
+	iText(337, 398, "1. Mehedi Hasan Ibne Rais", GLUT_BITMAP_HELVETICA_18);
+	iSetColor(255, 255, 255);
+	iText(335, 400, "1. Mehedi Hasan Ibne Rais", GLUT_BITMAP_HELVETICA_18);
+
+	iSetColor(20, 10, 35);
+	iText(337, 363, "ID: 00725105101151", GLUT_BITMAP_HELVETICA_18);
+	iSetColor(255, 235, 80);
+	iText(335, 365, "ID: 00725105101151", GLUT_BITMAP_HELVETICA_18);
+
+	// 2nd member
+	iSetColor(20, 10, 35);
+	iText(337, 313, "2. Md. Shajjadul Islam", GLUT_BITMAP_HELVETICA_18);
+	iSetColor(255, 255, 255);
+	iText(335, 315, "2. Md. Shajjadul Islam", GLUT_BITMAP_HELVETICA_18);
+
+	iSetColor(20, 10, 35);
+	iText(337, 278, "ID: 00725105101148", GLUT_BITMAP_HELVETICA_18);
+	iSetColor(255, 235, 80);
+	iText(335, 280, "ID: 00725105101148", GLUT_BITMAP_HELVETICA_18);
+
+	// 3rd member
+	iSetColor(20, 10, 35);
+	iText(337, 228, "3. Md. Abed Bin Rahman", GLUT_BITMAP_HELVETICA_18);
+	iSetColor(255, 255, 255);
+	iText(335, 230, "3. Md. Abed Bin Rahman", GLUT_BITMAP_HELVETICA_18);
+
+	iSetColor(20, 10, 35);
+	iText(337, 193, "ID: 00725105101172", GLUT_BITMAP_HELVETICA_18);
+	iSetColor(255, 235, 80);
+	iText(335, 195, "ID: 00725105101172", GLUT_BITMAP_HELVETICA_18);
+
+	drawButton(backButton, "BACK", false, hoverOffset[0]);
+}
+
+void loadSavedGame()
+{
+	int savedLevel = saveGetContinueLevel();
+	if (savedLevel < 1 || savedLevel > 4) savedLevel = 1;
+
+	health = 100;
+	score = 0;
+	level = savedLevel;
+
+	if (savedLevel == 1)
+	{
+		resetEnemies();
+		resetHero();
+		resetObstacles();
+		currentState = PLAYING;
+	}
+	else if (savedLevel == 2)
+	{
+		resetHero2();
+		resetEnemies2();
+		resetObstacles2();
+		currentState = LEVEL2_PLAYING;
+	}
+	else if (savedLevel == 3)
+	{
+		resetHero3();
+		resetEnemies3();
+		currentState = LEVEL3_PLAYING;
+	}
+	else
+	{
+		resetHero4();
+		resetEnemies4();
+		currentState = LEVEL4_PLAYING;
+	}
+}
+
 void drawMainMenu()
 {
 	drawBlurredInterface();
 	drawTitle();
 	drawButton(startButton, "START GAME",
 		selectedMenu == 0, hoverOffset[0]);
-	drawButton(levelButton, "LEVEL",
+	drawButton(optionsButton, "OPTIONS",
 		selectedMenu == 1, hoverOffset[1]);
 	drawButton(settingsButton, "SETTINGS",
 		selectedMenu == 2, hoverOffset[2]);
@@ -221,6 +338,94 @@ void drawMainMenu()
 	iSetColor(255, 255, 255);
 	iText(355, 45, "A 2D STORY-DRIVEN ACTION GAME",
 		GLUT_BITMAP_HELVETICA_12);
+}
+
+
+/* =========================================================
+PLAYER NAME INPUT
+========================================================= */
+void startNewGame()
+{
+	health = 100; score = 0; level = 1;
+	resetEnemies();
+	resetHero();
+	resetObstacles();
+	saveOnGameStart();
+	storyStart(STORY_INTRO);
+}
+
+/* open the name screen; the last used name is already filled in */
+bool nameLoadMode = false;   /* true = LOAD GAME name screen, false = START GAME */
+
+/* START GAME: always an EMPTY box, the player types a name every time */
+void beginNameInput(GameState next)
+{
+	nameNextState = next;
+	nameLoadMode = false;
+	nameInputReset();
+	saveClearMessage();
+	currentState = NAME_INPUT;
+}
+
+/* LOAD GAME: type the name you saved with; the last player is pre-filled */
+void beginLoadInput()
+{
+	nameNextState = PLAYING;
+	nameLoadMode = true;
+	if (saveHasPlayerName()) nameInputSet(saveGetPlayerName());
+	else nameInputReset();
+	saveClearMessage();
+	currentState = NAME_INPUT;
+}
+
+void confirmPlayerName()
+{
+	if (nameLoadMode)
+	{
+		/* resume that player's saved level; unknown name -> stay here and show a message */
+		if (saveLoadPlayer(nameInputGet())) loadSavedGame();
+		return;
+	}
+	saveSetPlayerName(nameInputGet());
+	if (nameNextState == LEVEL_SELECT) currentState = LEVEL_SELECT;
+	else startNewGame();
+}
+
+void drawNameInput()
+{
+	drawBlurredInterface();
+	drawPurpleTitleBox(312, 450, 400, 60);
+	iSetColor(255, 255, 255);
+	if (nameLoadMode)
+		iText(345, 472, "LOAD GAME - YOUR NAME", GLUT_BITMAP_TIMES_ROMAN_24);
+	else
+		iText(370, 472, "ENTER YOUR NAME", GLUT_BITMAP_TIMES_ROMAN_24);
+
+	/* text box */
+	iSetColor(52, 21, 82);
+	iFilledRectangle(330, 335, 364, 60);
+	iSetColor(234, 213, 255);
+	iRectangle(330, 335, 364, 60);
+	iSetColor(255, 255, 255);
+	char shown[64];
+	bool blink = (interfaceBlinkFrame < 30);
+	sprintf_s(shown, "%s%s", nameInputGet(), blink ? "_" : "");
+	iText(350, 358, shown, GLUT_BITMAP_TIMES_ROMAN_24);
+
+	iSetColor(190, 170, 130);
+	iText(345, 300, "Type your name (max 15 letters), then press ENTER",
+		GLUT_BITMAP_HELVETICA_12);
+
+	if (saveGetMessage()[0] != '\0')
+	{
+		iSetColor(255, 120, 120);
+		iText(345, 320, (char*)saveGetMessage(), GLUT_BITMAP_HELVETICA_18);
+	}
+	if (nameLoadMode)
+		saveDrawPlayerList(715, 395);
+
+	drawButton(nameConfirmButton, "CONFIRM", false, 0);
+	drawButton(backButton, "BACK", false, 0);
 }
 
 void drawLevelSelect()
@@ -405,7 +610,7 @@ void drawLevel4()
 	drawLevel4Background();
 	/* Draw actors before obstacles so Hero/Enemy are hidden behind cover. */
 	drawEnemies4();
-	drawHero2();
+	drawHero4();
 	drawLevel4Obstacles();
 	drawPurpleTitleBox(335, 440, 354, 38);
 	iSetColor(255,255,255);
@@ -479,9 +684,12 @@ void drawGameOver()
 	iSetColor(255, 255, 255);
 	iText(390, 390, "Shamsher Kazi has fallen.",
 		GLUT_BITMAP_HELVETICA_18);
+	char pn[40];
+	sprintf_s(pn, "PLAYER : %s", saveGetPlayerName());
+	iText(420, 365, pn, GLUT_BITMAP_HELVETICA_18);
 	char fs[50];
 	sprintf_s(fs, "FINAL SCORE : %d", score);
-	iText(420, 340, fs, GLUT_BITMAP_HELVETICA_18);
+	iText(420, 335, fs, GLUT_BITMAP_HELVETICA_18);
 	drawButton(restartButton, "RESTART", false, 0);
 	drawButton(mainMenuButton, "MAIN MENU", false, 0);
 }
@@ -540,7 +748,7 @@ void iPassiveMouseMove(int mx, int my)
 		else if (hoverOffset[0] > 0)
 			hoverOffset[0] = 0;
 
-		if (isInside(levelButton, mx, my))
+		if (isInside(optionsButton, mx, my))
 			hoverOffset[1] = 10;
 		else if (hoverOffset[1] > 0)
 			hoverOffset[1] = 0;
@@ -554,6 +762,37 @@ void iPassiveMouseMove(int mx, int my)
 			hoverOffset[3] = 10;
 		else if (hoverOffset[3] > 0)
 			hoverOffset[3] = 0;
+	}
+
+	/* -------- OPTIONS -------- */
+	else if (currentState == OPTIONS)
+	{
+		if (isInside(loadGameButton, mx, my))
+			hoverOffset[0] = 10;
+		else if (hoverOffset[0] > 0)
+			hoverOffset[0] = 0;
+
+		if (isInside(highScoreButton, mx, my))
+			hoverOffset[1] = 10;
+		else if (hoverOffset[1] > 0)
+			hoverOffset[1] = 0;
+
+		if (isInside(creditsButton, mx, my))
+			hoverOffset[2] = 10;
+		else if (hoverOffset[2] > 0)
+			hoverOffset[2] = 0;
+
+		if (isInside(backButton, mx, my))
+			hoverOffset[3] = 10;
+		else if (hoverOffset[3] > 0)
+			hoverOffset[3] = 0;
+	}
+	else if (currentState == HIGH_SCORE || currentState == CREDITS)
+	{
+		if (isInside(backButton, mx, my))
+			hoverOffset[0] = 10;
+		else if (hoverOffset[0] > 0)
+			hoverOffset[0] = 0;
 	}
 
 	/* -------- LEVEL SELECT -------- */
@@ -716,6 +955,7 @@ void iMouse(int button, int state, int mx, int my)
 	{
 		if (isInside(backToMenuButton, mx, my))
 		{
+			saveCurrentLevel(level, score);   /* save this level only, no unlock */
 			health = 100; score = 0; level = 1;
 			currentState = MENU;
 		}
@@ -730,7 +970,9 @@ void iMouse(int button, int state, int mx, int my)
 	{
 		if (isInside(backToMenuButton, mx, my))
 		{
-			currentState = LEVEL_COMPLETE;
+			saveCurrentLevel(level, score);   /* save this level only, no unlock */
+			health = 100; score = 0; level = 1;
+			currentState = MENU;
 		}
 		else
 		{
@@ -743,7 +985,9 @@ void iMouse(int button, int state, int mx, int my)
 	{
 		if (isInside(backToMenuButton, mx, my))
 		{
-			currentState = LEVEL_COMPLETE;
+			saveCurrentLevel(level, score);   /* save this level only, no unlock */
+			health = 100; score = 0; level = 1;
+			currentState = MENU;
 		}
 		else
 		{
@@ -756,33 +1000,67 @@ void iMouse(int button, int state, int mx, int my)
 	{
 		if (isInside(backToMenuButton, mx, my))
 		{
-			currentState = LEVEL_COMPLETE;
+			saveCurrentLevel(level, score);   /* save this level only, no unlock */
+			health = 100; score = 0; level = 1;
+			currentState = MENU;
 		}
 		else
 		{
-			hero2Attack();
+			hero4Attack();
 			playerAttackEnemies34();
 		}
 		return;
+	}
+
+	/* -------- NAME INPUT -------- */
+	else if (currentState == NAME_INPUT)
+	{
+		if (isInside(nameConfirmButton, mx, my))
+		{
+			if (nameInputKey(13)) confirmPlayerName();
+		}
+		else if (isInside(backButton, mx, my))
+			currentState = nameLoadMode ? OPTIONS : MENU;
 	}
 
 	/* -------- MENU -------- */
 	else if (currentState == MENU)
 	{
 		if (isInside(startButton, mx, my))
-		{
-			health = 100; score = 0; level = 1;
-			resetEnemies();
-			resetHero();
-			resetObstacles();
-			storyStart(STORY_INTRO);
-		}
-		else if (isInside(levelButton, mx, my))
-			currentState = LEVEL_SELECT;
+			beginNameInput(PLAYING);
+		else if (isInside(optionsButton, mx, my))
+			currentState = OPTIONS;
 		else if (isInside(settingsButton, mx, my))
 			currentState = SETTINGS;
 		else if (isInside(exitButton, mx, my))
 			exit(0);
+	}
+
+	/* -------- OPTIONS -------- */
+	else if (currentState == OPTIONS)
+	{
+		if (isInside(loadGameButton, mx, my))
+		{
+			beginLoadInput();
+		}
+		else if (isInside(highScoreButton, mx, my))
+			currentState = HIGH_SCORE;
+		else if (isInside(creditsButton, mx, my))
+			currentState = CREDITS;
+		else if (isInside(backButton, mx, my))
+			currentState = MENU;
+	}
+	/* -------- HIGH SCORE -------- */
+	else if (currentState == HIGH_SCORE)
+	{
+		if (isInside(backButton, mx, my))
+			currentState = OPTIONS;
+	}
+	/* -------- CREDITS -------- */
+	else if (currentState == CREDITS)
+	{
+		if (isInside(backButton, mx, my))
+			currentState = OPTIONS;
 	}
 
 	/* -------- LEVEL SELECT -------- */
@@ -814,7 +1092,7 @@ void iMouse(int button, int state, int mx, int my)
 		else if (isInside(level4Button, mx, my))
 		{
 			health = 100; score = 0; level = 4;
-			resetHero2();
+			resetHero4();
 			resetEnemies4();
 			currentState = LEVEL4_PLAYING;
 		}
@@ -848,10 +1126,12 @@ void iMouse(int button, int state, int mx, int my)
 		if (isInside(soundButton, mx, my))
 		{
 			soundOn = !soundOn;
+			saveSettings();
 		}
 		else if (isInside(musicButton, mx, my))
 		{
 			musicOn = !musicOn;
+			saveSettings();
 			if (musicOn)
 			{
 				// যে state এ ছিল সেই music চালাও
@@ -929,7 +1209,8 @@ void iMouse(int button, int state, int mx, int my)
 			else if (level == 3)
 			{
 				health = 100; level = 4;
-				resetHero2(); resetEnemies4(); currentState = LEVEL4_PLAYING;
+				resetHero4(); resetEnemies4();
+				storyStart(STORY_LEVEL4_START);
 			}
 			else if (level == 4)
 			{
@@ -943,7 +1224,17 @@ void iMouse(int button, int state, int mx, int my)
 
 void iKeyboard(unsigned char key)
 {
-	if (currentState == INTERFACE)
+	if (currentState == NAME_INPUT)
+	{
+		if (key == 27)
+			currentState = nameLoadMode ? OPTIONS : MENU;
+		else
+		{
+			if (key != 13) saveClearMessage();
+			if (nameInputKey(key)) confirmPlayerName();
+		}
+	}
+	else if (currentState == INTERFACE)
 	{
 		if (key == 13 || key == '\r' || key == '\n')
 			currentState = MENU;
@@ -963,20 +1254,33 @@ void iKeyboard(unsigned char key)
 		else if (key == 13)
 		{
 			if (selectedMenu == 0)
-			{
-				health = 100; score = 0; level = 1;
-				resetEnemies();
-				resetHero();
-				resetObstacles();
-				storyStart(STORY_INTRO);
-			}
+				beginNameInput(PLAYING);
 			else if (selectedMenu == 1)
-				currentState = LEVEL_SELECT;
+				currentState = OPTIONS;
 			else if (selectedMenu == 2)
 				currentState = SETTINGS;
 			else if (selectedMenu == 3)
 				exit(0);
 		}
+	}
+	else if (currentState == OPTIONS)
+	{
+		if (key == 27)
+			currentState = MENU;
+		else if (key == '1')
+			beginLoadInput();
+		else if (key == '2')
+			currentState = HIGH_SCORE;
+		else if (key == '3')
+			currentState = CREDITS;
+	}
+	else if (currentState == HIGH_SCORE)
+	{
+		if (key == 27) currentState = OPTIONS;
+	}
+	else if (currentState == CREDITS)
+	{
+		if (key == 27) currentState = OPTIONS;
 	}
 	else if (currentState == LEVEL_SELECT)
 	{
@@ -989,7 +1293,9 @@ void iKeyboard(unsigned char key)
 		currentState == STORY_LEVEL2_START_STATE ||
 		currentState == STORY_LEVEL2_END_STATE ||
 		currentState == STORY_LEVEL3_START_STATE ||
-		currentState == STORY_LEVEL3_END_STATE)
+		currentState == STORY_LEVEL3_END_STATE ||
+		currentState == STORY_LEVEL4_START_STATE ||
+		currentState == STORY_LEVEL4_END_STATE)
 	{
 		if (key == 13 || key == '\r' || key == '\n')
 			storyContinue();
@@ -1045,7 +1351,7 @@ void iKeyboard(unsigned char key)
 		}
 		else if (key == 'j' || key == 'J')
 		{
-			hero2Attack();
+			hero4Attack();
 			playerAttackEnemies34();
 		}
 		else if (key == 27) currentState = MENU;
@@ -1091,6 +1397,14 @@ void iDraw()
 		drawMainMenu();
 	else if (currentState == LEVEL_SELECT)
 		drawLevelSelect();
+	else if (currentState == OPTIONS)
+		drawOptions();
+	else if (currentState == HIGH_SCORE)
+		drawHighScore();
+	else if (currentState == CREDITS)
+		drawCredits();
+	else if (currentState == NAME_INPUT)
+		drawNameInput();
 	else if (currentState == GAME_MODE)
 		drawGameMode();
 	else if (currentState == SETTINGS)
@@ -1103,7 +1417,9 @@ void iDraw()
 		currentState == STORY_LEVEL2_START_STATE ||
 		currentState == STORY_LEVEL2_END_STATE ||
 		currentState == STORY_LEVEL3_START_STATE ||
-		currentState == STORY_LEVEL3_END_STATE)
+		currentState == STORY_LEVEL3_END_STATE ||
+		currentState == STORY_LEVEL4_START_STATE ||
+		currentState == STORY_LEVEL4_END_STATE)
 		drawStory();
 	else if (currentState == PLAYING)
 		drawLevel1();
@@ -1127,6 +1443,21 @@ FIXED UPDATE
 ========================================================= */
 void fixedUpdate()
 {
+	/* save-file hooks: react once when the state changes */
+	static GameState prevSaveState = INTERFACE;
+	if (currentState != prevSaveState)
+	{
+		if (currentState == GAME_OVER)
+		{
+			saveOnGameOver(level, score);   /* also puts the run total on the score board */
+		}
+		else if (currentState == LEVEL_COMPLETE)
+			saveOnLevelComplete(level, score);
+		else if (currentState == MENU && prevSaveState == PAUSED)
+			saveOnQuitRun(level, score);    /* quit a run from the pause menu */
+		prevSaveState = currentState;
+	}
+
 	interfaceBlinkFrame++;
 	if (interfaceBlinkFrame >= 60)
 		interfaceBlinkFrame = 0;
@@ -1137,7 +1468,9 @@ void fixedUpdate()
 		currentState == STORY_LEVEL2_START_STATE ||
 		currentState == STORY_LEVEL2_END_STATE ||
 		currentState == STORY_LEVEL3_START_STATE ||
-		currentState == STORY_LEVEL3_END_STATE)
+		currentState == STORY_LEVEL3_END_STATE ||
+		currentState == STORY_LEVEL4_START_STATE ||
+		currentState == STORY_LEVEL4_END_STATE)
 	{
 		storyUpdate();
 	}
@@ -1145,8 +1478,12 @@ void fixedUpdate()
 	if (lastMusicState != currentState)
 	{
 		if (currentState == MENU ||
+			currentState == NAME_INPUT ||
 			currentState == INTERFACE ||
 			currentState == LEVEL_SELECT ||
+			currentState == OPTIONS ||
+			currentState == HIGH_SCORE ||
+			currentState == CREDITS ||
 			currentState == GAME_MODE ||
 			currentState == SETTINGS ||
 			currentState == CONTROLS ||
@@ -1207,14 +1544,18 @@ void fixedUpdate()
 	}
 	else if (currentState == LEVEL4_PLAYING)
 	{
-		updateHero2();
+		updateHero4();
 		updateEnemies4();
 		updateLevel4Collisions();
 	}
 
 	if (currentState == INTERFACE ||
 		currentState == MENU ||
+		currentState == NAME_INPUT ||
 		currentState == LEVEL_SELECT ||
+		currentState == OPTIONS ||
+		currentState == HIGH_SCORE ||
+		currentState == CREDITS ||
 		currentState == STORY_INTRO_STATE ||
 		currentState == STORY_LEVEL1_STATE ||
 		currentState == STORY_ENDING_STATE ||
@@ -1222,6 +1563,8 @@ void fixedUpdate()
 		currentState == STORY_LEVEL2_END_STATE ||
 		currentState == STORY_LEVEL3_START_STATE ||
 		currentState == STORY_LEVEL3_END_STATE ||
+		currentState == STORY_LEVEL4_START_STATE ||
+		currentState == STORY_LEVEL4_END_STATE ||
 		currentState == GAME_MODE ||
 		currentState == SETTINGS ||
 		currentState == CONTROLS ||
@@ -1253,6 +1596,7 @@ int main()
 	initHero();
 	initHero2();
 	initHero3();
+	initHero4();
 	initBackground();
 	initObstacles();
 	initLevel2();
@@ -1264,6 +1608,8 @@ int main()
 	initEnemies2();
 	initEnemies3();
 	initEnemies4();
+
+	saveSystemInit();
 
 	if (musicOn)
 	{

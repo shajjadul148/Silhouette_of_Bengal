@@ -74,6 +74,7 @@
     <ClInclude Include="hero.h" />
     <ClInclude Include="hero2.h" />
     <ClInclude Include="hero3.h" />
+    <ClInclude Include="hero4.h" />
     <ClInclude Include="globals.h" />
     <ClInclude Include="input.h" />
     <ClInclude Include="Level2.h" />
@@ -91,6 +92,7 @@
     <ClInclude Include="StairMechanics.h" />
     <ClInclude Include="enemy4.h" />
     <ClInclude Include="collision4.h" />
+    <ClInclude Include="SaveSystem.h" />
   </ItemGroup>
   <Import Project="$(VCTargetsPath)\Microsoft.Cpp.targets" />
   <ImportGroup Label="ExtensionTargets">

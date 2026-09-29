@@ -15,39 +15,140 @@ extern float cameraX;
 
 /* -------- tunables -------- */
 #define MAX_ENEMIES            5
-#define ENEMY_IDLE_FRAMES      4
-#define ENEMY_ATTACK_FRAMES    2
+#define ENEMY_WALK_FRAMES      4
+#define ENEMY_FIGHT_FRAMES     5
 #define ENEMY_ANIM_SPEED       8        // frames between sprite changes (lower = faster)
 #define ENEMY_ATTACK_COOLDOWN  60       // frames before an enemy can attack again
-#define IGNORE_WHITE           0xFFFFFF // sprite background treated as transparent
+#define ENEMY_COLORKEY_TOLERANCE 24     // how close to pure white still counts as "background"
+#define IGNORE_WHITE           0xFFFFFF // (legacy) BMP transparent colour, no longer used by Level 1 enemies
+
+#define ENEMY_DRAW_WIDTH       100
+#define ENEMY_DRAW_HEIGHT      100
+#define ENEMY_GROUND_Y         40.0f    // same ground line as hero.h's HERO_GROUND_Y
 
 #define PLAYER_ATTACK_RANGE    20.0f    // reach of the player's 'J' attack
 #define PLAYER_ATTACK_DAMAGE   20       // Level 1 enemies lose health faster per J attack
 
-#define ENEMY_RESPAWN_DELAY    45       // frames of pause after a knight dies before the next one appears
+#define ENEMY_RESPAWN_DELAY    45       // frames of pause after a soldier dies before the next one appears
 
-#define ENEMY_CHASE_RANGE      300.0f   // player must be this close before the knight starts walking over
-#define ENEMY_CHASE_SPEED      1.6f     // px/frame the knight closes the gap by while chasing (hero walks at 4.0f)
+#define ENEMY_CHASE_RANGE      300.0f   // "detection range" -- player must be this close before the soldier breaks off and engages
+#define ENEMY_CHASE_SPEED      1.6f     // px/frame the soldier closes the gap by while chasing (hero walks at 4.0f)
 
-enum EnemyState { ENEMY_IDLE, ENEMY_CHASE, ENEMY_ATTACKING, ENEMY_DEAD };
+/* Same standing-guard / shadow-the-hero behaviour as Level 2 (enemy2.h). */
+#define ENEMY_PATROL_SPEED     1.2f     // px/frame once a soldier starts shadowing the hero (post-pass, outside detection range)
+#define ENEMY_PATROL_DEADZONE  6.0f     // how close to the hero's x counts as "level with him" (stand still, don't jitter)
+#define ENEMY_PASS_MARGIN      80.0f    // how far the hero must walk past a soldier's post before it starts shadowing him
 
-/* Idle / walk-stance loop */
-static char enemyIdleFrames[ENEMY_IDLE_FRAMES][100] = {
-	"Images\\Enemy\\Enemy_01.bmp",
-	"Images\\Enemy\\Enemy_02.bmp",
-	"Images\\Enemy\\Enemy_03.bmp",
-	"Images\\Enemy\\Enemy_04.bmp"
+enum EnemyFacing { ENEMY_FACING_LEFT = -1, ENEMY_FACING_RIGHT = 1 };
+enum EnemyState { ENEMY_STANDING, ENEMY_PATROL, ENEMY_CHASE, ENEMY_ATTACKING, ENEMY_DEAD };
+
+/* -------- sprite filenames (Images\\Enemy1\\...) -------- */
+static char enemyWalkLeftFiles[ENEMY_WALK_FRAMES][100] = {
+	"Images\\Enemy1\\Walking\\walking_left_1.png",
+	"Images\\Enemy1\\Walking\\walking_left_2.png",
+	"Images\\Enemy1\\Walking\\walking_left_3.png",
+	"Images\\Enemy1\\Walking\\walking_left_4.png"
 };
-
-/* Attack swing (thrust then strike) */
-static char enemyAttackFrames[ENEMY_ATTACK_FRAMES][100] = {
-	"Images\\Enemy\\Enemy_05.bmp",
-	"Images\\Enemy\\Enemy_06.bmp"
+static char enemyWalkRightFiles[ENEMY_WALK_FRAMES][100] = {
+	"Images\\Enemy1\\Walking\\walking_right_1.png",
+	"Images\\Enemy1\\Walking\\walking_right_2.png",
+	"Images\\Enemy1\\Walking\\walking_right_3.png",
+	"Images\\Enemy1\\Walking\\walking_right_4.png"
 };
+static char enemyFightLeftFiles[ENEMY_FIGHT_FRAMES][100] = {
+	"Images\\Enemy1\\Fighting\\fighting_left_1.png",
+	"Images\\Enemy1\\Fighting\\fighting_left_2.png",
+	"Images\\Enemy1\\Fighting\\fighting_left_3.png",
+	"Images\\Enemy1\\Fighting\\fighting_left_4.png",
+	"Images\\Enemy1\\Fighting\\fighting_left_5.png"
+};
+static char enemyFightRightFiles[ENEMY_FIGHT_FRAMES][100] = {
+	"Images\\Enemy1\\Fighting\\fighting_right_1.png",
+	"Images\\Enemy1\\Fighting\\fighting_right_2.png",
+	"Images\\Enemy1\\Fighting\\fighting_right_3.png",
+	"Images\\Enemy1\\Fighting\\fighting_right_4.png",
+	"Images\\Enemy1\\Fighting\\fighting_right_5.png"
+};
+static char enemyStandLeftFile[100]  = "Images\\Enemy1\\Standing\\standing_left.png";
+static char enemyStandRightFile[100] = "Images\\Enemy1\\Standing\\standing_right.png";
 
-/* Enemy_07.bmp and Enemy_08.bmp (overhead strike / shield-guard) are
-included in the Images\Enemy folder but not wired up yet — spare
-frames if a 3rd attack frame or a distinct guard pose is wanted later. */
+/* -------- loaded textures (filled in by initEnemyTextures()) -------- */
+static unsigned int enemyWalkLeftTex[ENEMY_WALK_FRAMES];
+static unsigned int enemyWalkRightTex[ENEMY_WALK_FRAMES];
+static unsigned int enemyFightLeftTex[ENEMY_FIGHT_FRAMES];
+static unsigned int enemyFightRightTex[ENEMY_FIGHT_FRAMES];
+static unsigned int enemyStandLeftTex;
+static unsigned int enemyStandRightTex;
+
+/* loadEnemyTexture -- same white-colorkey trick as enemy2.h / hero.h:
+   the Images\\Enemy1 frames are flat-white-background PNGs, so any pixel
+   close to pure white is made fully transparent before upload. */
+inline unsigned int loadEnemyTexture(char filename[])
+{
+	int w, h, channels;
+	unsigned char *data = stbi_load(filename, &w, &h, &channels, 4);
+	if (!data)
+		return 0; // missing/bad file -- draws nothing rather than crashing
+
+	int nPixels = w * h;
+	for (int i = 0; i < nPixels; i++)
+	{
+		unsigned char *p = data + i * 4;
+		bool nearWhite =
+			p[0] >= 255 - ENEMY_COLORKEY_TOLERANCE &&
+			p[1] >= 255 - ENEMY_COLORKEY_TOLERANCE &&
+			p[2] >= 255 - ENEMY_COLORKEY_TOLERANCE;
+		p[3] = nearWhite ? 0 : 255;
+	}
+
+	unsigned int texture;
+	glGenTextures(1, &texture);
+	glBindTexture(GL_TEXTURE_2D, texture);
+	glTexImage2D(GL_TEXTURE_2D, 0, GL_RGBA, w, h, 0,
+		GL_RGBA, GL_UNSIGNED_BYTE, data);
+
+	stbi_image_free(data);
+	return texture;
+}
+
+inline void initEnemyTextures()
+{
+	for (int i = 0; i < ENEMY_WALK_FRAMES; i++)
+	{
+		enemyWalkLeftTex[i]  = loadEnemyTexture(enemyWalkLeftFiles[i]);
+		enemyWalkRightTex[i] = loadEnemyTexture(enemyWalkRightFiles[i]);
+	}
+	for (int i = 0; i < ENEMY_FIGHT_FRAMES; i++)
+	{
+		enemyFightLeftTex[i]  = loadEnemyTexture(enemyFightLeftFiles[i]);
+		enemyFightRightTex[i] = loadEnemyTexture(enemyFightRightFiles[i]);
+	}
+	enemyStandLeftTex  = loadEnemyTexture(enemyStandLeftFile);
+	enemyStandRightTex = loadEnemyTexture(enemyStandRightFile);
+}
+
+/* drawEnemyTexture -- textured quad (left/right art is separate, so the
+   caller picks the right texture up front instead of mirroring). */
+inline void drawEnemyTexture(int x, int y, int w, int h, unsigned int texture)
+{
+	glEnable(GL_TEXTURE_2D);
+	glBindTexture(GL_TEXTURE_2D, texture);
+
+	glTexParameterf(GL_TEXTURE_2D, GL_TEXTURE_MIN_FILTER, GL_LINEAR);
+	glTexParameterf(GL_TEXTURE_2D, GL_TEXTURE_MAG_FILTER, GL_LINEAR);
+	glTexParameterf(GL_TEXTURE_2D, GL_TEXTURE_WRAP_S, GL_REPEAT);
+	glTexParameterf(GL_TEXTURE_2D, GL_TEXTURE_WRAP_T, GL_REPEAT);
+	glTexEnvf(GL_TEXTURE_ENV, GL_TEXTURE_ENV_MODE, GL_REPLACE);
+
+	glBegin(GL_QUADS);
+		glTexCoord2f(0, 0);  glVertex2f(x, y);
+		glTexCoord2f(1, 0);  glVertex2f(x + w, y);
+		glTexCoord2f(1, -1); glVertex2f(x + w, y + h);
+		glTexCoord2f(0, -1); glVertex2f(x, y + h);
+	glEnd();
+
+	glDisable(GL_TEXTURE_2D);
+}
 
 
 /* =========================================================
@@ -64,10 +165,13 @@ public:
 	bool alive;
 	int scoreValue;           // score awarded to player when killed
 
+	int facing;               // ENEMY_FACING_LEFT / ENEMY_FACING_RIGHT
 	EnemyState state;
 	int currentFrame;
 	int frameTimer;
 	int attackCooldownTimer;
+
+	bool hasPassedPlayer;     // true once the hero has walked past this soldier's post
 
 	Enemy()
 	{
@@ -79,18 +183,18 @@ public:
 	{
 		x = px; y = py;
 
-		// The knight_*.bmp sprites are 100x100 px, and iShowBMP2 has
-		// no width/height params of its own — it always draws a sprite
-		// at its real pixel size. So these MUST match the actual bmp
-		// dimensions, or the health bar (which is positioned off of
-		// these) drifts away from where the sprite is really drawn.
-		width = 100; height = 100;
+		// The sprites are 100x100 px and are drawn 1:1, so the health
+		// bar (positioned off width/height) sits right over the head.
+		width = ENEMY_DRAW_WIDTH; height = ENEMY_DRAW_HEIGHT;
 		hp = hpVal; maxHp = hpVal;
 		damage = dmgVal;
 		attackRange = range;
 		scoreValue = scoreVal;
 		alive = true;
-		state = ENEMY_IDLE;
+
+		facing = ENEMY_FACING_RIGHT;
+		state = ENEMY_STANDING;
+		hasPassedPlayer = false;
 		currentFrame = 0;
 		frameTimer = 0;
 		attackCooldownTimer = 0;
@@ -103,13 +207,10 @@ public:
 		return sqrtf(dx * dx + dy * dy);
 	}
 
-	// Box-based version of the same idea (see enemy_collision.h):
-	// is the player's hitbox overlapping this knight's box once
-	// it's expanded outward by `range` pixels? Used instead of
-	// distanceToPlayer() for both "start attacking" and "was the
-	// player's swing a hit" — a box test reads as more forgiving/
-	// natural than a circular radius for side-scroller sprites
-	// that are wider than they are deep.
+	// Box-based range test (see enemy_collision.h): is the player's
+	// hitbox overlapping this soldier's box once it's expanded outward
+	// by `range` pixels? Used for both "start attacking" and "was the
+	// player's swing a hit".
 	bool playerInRange(float range) const
 	{
 		return playerInEnemyRange(x, y, (float)width, (float)height, range);
@@ -128,26 +229,60 @@ public:
 		}
 	}
 
-	// Steps x one frame closer to playerX, at ENEMY_CHASE_SPEED, without
-	// overshooting/jittering past the target once it's within one step.
+	/* Turns to face whichever side the hero is CURRENTLY on, with
+	   ENEMY_PATROL_DEADZONE as hysteresis so the art doesn't flicker
+	   left/right while the hero is level with the soldier. Every
+	   walk/fight/stand pose goes through this. */
+	void faceTowardPlayer()
+	{
+		float dx = playerX - x;
+		if (dx > ENEMY_PATROL_DEADZONE)
+			facing = ENEMY_FACING_RIGHT;
+		else if (dx < -ENEMY_PATROL_DEADZONE)
+			facing = ENEMY_FACING_LEFT;
+	}
+
+	/* "Shadow the hero": one step toward whichever side he is on, hold
+	   still once roughly level with him. */
+	void trackPlayerSide()
+	{
+		float oldX = x;
+		float newX = x;
+		float dx = playerX - x;
+		faceTowardPlayer();
+
+		if (dx > ENEMY_PATROL_DEADZONE)
+			newX = x + ENEMY_PATROL_SPEED;
+		else if (dx < -ENEMY_PATROL_DEADZONE)
+			newX = x - ENEMY_PATROL_SPEED;
+
+		// Soldiers can't walk through the Level 1 obstacles.
+		newX = blockEnemyAtAllObstacles(oldX, newX, (float)width);
+		x = newX;
+
+		if (x < 0) x = 0;
+		if (x > LEVEL1_WIDTH - width) x = LEVEL1_WIDTH - width;
+	}
+
+	// Steps x one frame closer to playerX (from either side), at
+	// ENEMY_CHASE_SPEED, without overshooting/jittering.
 	void moveTowardPlayer()
 	{
 		float oldX = x;
 		float newX = x;
-
 		float dx = playerX - x;
+		faceTowardPlayer();
+
 		if (dx > ENEMY_CHASE_SPEED)       newX = x + ENEMY_CHASE_SPEED;
 		else if (dx < -ENEMY_CHASE_SPEED) newX = x - ENEMY_CHASE_SPEED;
 		else                               newX = playerX;
 
-		// FIX: knights used to walk straight through the Level 1
-		// obstacles while chasing the player. blockEnemyAtAllObstacles()
-		// (enemy_collision.h) stops the step right at the obstacle's
-		// edge instead of letting it cross through.
+		// blockEnemyAtAllObstacles() (enemy_collision.h) stops the step
+		// right at the obstacle's edge instead of crossing through it.
 		newX = blockEnemyAtAllObstacles(oldX, newX, (float)width);
 		x = newX;
 
-		// Keep the knight from wandering off the edges of the level.
+		// Keep the soldier from wandering off the edges of the level.
 		if (x < 0) x = 0;
 		if (x > LEVEL1_WIDTH - width) x = LEVEL1_WIDTH - width;
 	}
@@ -166,9 +301,9 @@ public:
 			{
 				frameTimer = 0;
 				currentFrame++;
-				if (currentFrame >= ENEMY_ATTACK_FRAMES)
+				if (currentFrame >= ENEMY_FIGHT_FRAMES)
 				{
-					// Attack animation finished — apply damage if the
+					// Attack animation finished -- apply damage if the
 					// player is still in range at the moment of impact.
 					if (inAttackRange)
 					{
@@ -177,66 +312,95 @@ public:
 					}
 					currentFrame = 0;
 					attackCooldownTimer = ENEMY_ATTACK_COOLDOWN;
-					// Drop back to chase/idle depending on whether the
-					// player is still nearby once the swing is over.
-					state = inChaseRange ? ENEMY_CHASE : ENEMY_IDLE;
+
+					if (inChaseRange)
+						state = ENEMY_CHASE;
+					else if (hasPassedPlayer)
+						state = ENEMY_PATROL;
+					else
+						state = ENEMY_STANDING;
 				}
 			}
+			return;
 		}
-		else if (state == ENEMY_CHASE)
+
+		if (state == ENEMY_CHASE)
 		{
 			if (attackCooldownTimer > 0)
 				attackCooldownTimer--;
 
-			// Walking loop reuses the idle frames (no separate walk
-			// sprites yet) — same animation, just while x is changing.
 			if (frameTimer >= ENEMY_ANIM_SPEED)
 			{
 				frameTimer = 0;
-				currentFrame = (currentFrame + 1) % ENEMY_IDLE_FRAMES;
+				currentFrame = (currentFrame + 1) % ENEMY_WALK_FRAMES;
 			}
 
 			if (inAttackRange && attackCooldownTimer == 0)
 			{
+				faceTowardPlayer();
 				state = ENEMY_ATTACKING;
 				currentFrame = 0;
 				frameTimer = 0;
 			}
 			else if (!inChaseRange)
 			{
-				// Player wandered back out of chase range — give up
-				// and go back to idling in place.
-				state = ENEMY_IDLE;
+				// Player got away -- back to pacing if the hero is
+				// already past, otherwise back to standing guard.
+				state = hasPassedPlayer ? ENEMY_PATROL : ENEMY_STANDING;
 			}
-			else if (!inAttackRange)
+			else
 			{
-				// Still chasing: close the gap. Once in attack range
-				// the knight plants its feet and swings instead of
-				// walking into the player.
 				moveTowardPlayer();
 			}
+			return;
 		}
-		else // ENEMY_IDLE — stays put and does nothing until the
-			// player enters this knight's chase range.
+
+		/* ---- STANDING / PATROL: a nearby hero always takes priority ---- */
+		if (attackCooldownTimer > 0)
+			attackCooldownTimer--;
+
+		if (inAttackRange && attackCooldownTimer == 0)
 		{
-			if (attackCooldownTimer > 0)
-				attackCooldownTimer--;
+			faceTowardPlayer();
+			state = ENEMY_ATTACKING;
+			currentFrame = 0;
+			frameTimer = 0;
+			return;
+		}
+		if (inChaseRange)
+		{
+			state = ENEMY_CHASE;
+			return;
+		}
 
-			if (frameTimer >= ENEMY_ANIM_SPEED)
+		// Once the hero has walked far enough past this soldier's post
+		// it starts shadowing him. Only ever flips on, never back off.
+		if (!hasPassedPlayer && (playerX - x) > ENEMY_PASS_MARGIN)
+			hasPassedPlayer = true;
+
+		if (state == ENEMY_STANDING)
+		{
+			currentFrame = 0; // idle pose
+			faceTowardPlayer();  // watches the hero go by
+
+			if (hasPassedPlayer)
+				state = ENEMY_PATROL;
+			return;
+		}
+
+		// ENEMY_PATROL
+		{
+			bool moving = fabs(playerX - x) > ENEMY_PATROL_DEADZONE;
+			trackPlayerSide();
+
+			if (moving && frameTimer >= ENEMY_ANIM_SPEED)
 			{
 				frameTimer = 0;
-				currentFrame = (currentFrame + 1) % ENEMY_IDLE_FRAMES;
+				currentFrame = (currentFrame + 1) % ENEMY_WALK_FRAMES;
 			}
-
-			if (inAttackRange && attackCooldownTimer == 0)
+			else if (!moving)
 			{
-				state = ENEMY_ATTACKING;
-				currentFrame = 0;
-				frameTimer = 0;
-			}
-			else if (inChaseRange)
-			{
-				state = ENEMY_CHASE;
+				currentFrame = 0; // standing pose while level with the hero
 			}
 		}
 	}
@@ -245,28 +409,35 @@ public:
 	{
 		if (!alive) return;
 
-		// Convert this enemy's world position into a screen position
-		// now that the level scrolls (see background.h).
+		// World position -> screen position (level scrolls, see background.h).
 		float screenX = x - cameraX;
 
-		char *frameFile = (state == ENEMY_ATTACKING)
-			? enemyAttackFrames[currentFrame]
-			: enemyIdleFrames[currentFrame];
+		unsigned int tex;
+		if (state == ENEMY_ATTACKING)
+		{
+			tex = (facing == ENEMY_FACING_LEFT)
+				? enemyFightLeftTex[currentFrame]
+				: enemyFightRightTex[currentFrame];
+		}
+		else if (state == ENEMY_STANDING ||
+			(state == ENEMY_PATROL && fabs(playerX - x) <= ENEMY_PATROL_DEADZONE))
+		{
+			tex = (facing == ENEMY_FACING_LEFT) ? enemyStandLeftTex : enemyStandRightTex;
+		}
+		else // PATROL-moving or CHASE
+		{
+			tex = (facing == ENEMY_FACING_LEFT)
+				? enemyWalkLeftTex[currentFrame]
+				: enemyWalkRightTex[currentFrame];
+		}
 
-		iShowBMP2((int)screenX, (int)y, frameFile, IGNORE_WHITE);
+		drawEnemyTexture((int)screenX, (int)y, width, height, tex);
 
-		// Health bar centered directly over the knight's head. The
-		// sprite canvas has a few px of transparent padding above the
-		// actual helmet, and the visible knight is narrower than the
-		// full 100px canvas, so the bar is inset both ways rather than
-		// spanning the full sprite bounding box.
-		// NOTE: top padding re-measured for the new Enemy_*.bmp art
-		// (~6px, vs. 4px on the old placeholder sprites) — retune the
-		// "-6" below if the bar still looks off with the new frames.
+		// Health bar over the soldier's head (same proportions as before).
 		int barW = (int)(width * 0.55f);
 		int barH = 6;
 		int bx = (int)screenX + (width - barW) / 2;
-		int by = (int)y + height - 6 + 6;   // -6: sprite's top padding, +6: gap above head
+		int by = (int)y + height - 6 + 6;
 
 		iSetColor(60, 20, 20);
 		iFilledRectangle(bx, by, barW, barH);
@@ -340,7 +511,7 @@ public:
 		}
 
 		int i = defeatedCount;
-		enemies[i].spawn(configX(i), 40, configHp(i), configDamage(i),
+		enemies[i].spawn(configX(i), ENEMY_GROUND_Y, configHp(i), configDamage(i),
 			configRange, configScore(i));
 		activeIndex = i;
 	}
@@ -361,6 +532,7 @@ public:
 
 	void init()
 	{
+		initEnemyTextures();
 		reset();
 	}
 
